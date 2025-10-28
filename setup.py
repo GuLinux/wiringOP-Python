@@ -125,7 +125,7 @@ elif BOARD == "orangepir1plus-rk3328": EXTRA_CFLAGS = "-DCONFIG_ORANGEPI_R1PLUS"
 _wiringpi = Extension(
     '_wiringpi',
     include_dirs=['wiringOP', 'wiringOP/wiringPi', 'wiringOP/devLib'],
-    extra_compile_args=[EXTRA_CFLAGS, "-DCONFIG_ORANGEPI"],
+    extra_compile_args=[entry for entry in [EXTRA_CFLAGS, '-Wno-implicit-function-declaration', os.environ.get('WIRINGPI_EXTRA_CFLAGS', '')] if entry],
     swig_opts=['-threads'],
     extra_link_args=['-lcrypt', '-lrt'],
     sources=sources
