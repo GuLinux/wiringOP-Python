@@ -4,6 +4,11 @@
 #if PY_MAJOR_VERSION >= 3
 #define PyInt_AS_LONG PyLong_AsLong
 #define PyString_FromStringAndSize PyBytes_FromStringAndSize
+/* map older PyString_/PyInt_ names used below to Py3 equivalents */
+#define PyInt_Check PyLong_Check
+#define PyInt_AsLong PyLong_AsLong
+#define PyString_AsString PyBytes_AsString
+#define PyString_Size PyBytes_Size
 #endif
 
 #include "wiringOP/wiringPi/wiringPi.h"
@@ -55,11 +60,20 @@
 
 %apply unsigned char { uint8_t };
 %typemap(in) (unsigned char *data, int len) {
-      $1 = (unsigned char *) PyString_AsString($input);
-      $2 = PyString_Size($input);
-};
+    /* Accept bytes or bytearray (works on Py2/3 with above mappings) */
+    if (PyBytes_Check($input)) {
+        $1 = (unsigned char *) PyBytes_AsString($input);
+        $2 = PyBytes_Size($input);
+    } else if (PyByteArray_Check($input)) {
+        $1 = (unsigned char *) PyByteArray_AsString($input);
+        $2 = PyByteArray_Size($input);
+    } else {
+        PyErr_SetString(PyExc_TypeError, "Expected bytes or bytearray");
+        return NULL;
+    }
+}
 
-// Grab a Python function object as a Python object.
+/* Grab a Python function object as a Python object. */
 %typemap(in) PyObject *PyFunc {
   if (!PyCallable_Check($input)) {
       PyErr_SetString(PyExc_TypeError, "Need a callable object!");
@@ -248,26 +262,28 @@ static void wiringPiISRWrapper(int pin, int mode, PyObject *PyFunc) {
 
 %}
 
-// overlay normal function with our wrapper
+/* overlay normal function with our wrapper */
 %rename("wiringPiISR") wiringPiISRWrapper         (int pin, int mode, PyObject *PyFunc);
 static void wiringPiISRWrapper(int pin, int mode, PyObject *PyFunc);
 
+/* fixed typemap for 8-item unsigned char arrays (input) */
 %typemap(in) unsigned char data [8] {
   /* Check if is a list */
   if (PyList_Check($input)) {
-	if(PyList_Size($input) != 8){
-    		PyErr_SetString(PyExc_TypeError,"must contain 8 items");
-    		return NULL;
-	}
+    if(PyList_Size($input) != 8){
+        PyErr_SetString(PyExc_TypeError,"must contain 8 items");
+        return NULL;
+    }
     int i = 0;
     $1 = (unsigned char *) malloc(8);
     for (i = 0; i < 8; i++) {
       PyObject *o = PyList_GetItem($input,i);
-      if (PyInt_Check(o) && PyInt_AsLong(PyList_GetItem($input,i)) <= 255 && PyInt_AsLong(PyList_GetItem($input,i)) >= 0)
-		$1[i] = PyInt_AsLong(PyList_GetItem($input,i));
+      if (PyInt_Check(o) && PyInt_AsLong(o) <= 255 && PyInt_AsLong(o) >= 0)
+        $1[i] = PyInt_AsLong(o);
       else {
-		PyErr_SetString(PyExc_TypeError,"list must contain integers 0-255");
-		return NULL;
+        PyErr_SetString(PyExc_TypeError,"list must contain integers 0-255");
+        free((unsigned char *) $1);
+        return NULL;
       }
     }
   } else {
@@ -280,14 +296,15 @@ static void wiringPiISRWrapper(int pin, int mode, PyObject *PyFunc);
   free((unsigned char *) $1);
 }
 
-%typemap(in) (unsigned char *data, int len) {
-      $1 = (unsigned char *) PyString_AsString($input);
-      $2 = PyString_Size($input);
-};
-
-%typemap(argout) (unsigned char *data) {
-      $result = SWIG_Python_AppendOutput($result, PyString_FromStringAndSize((char *) $1, result));
-};
+/* argout for unsigned char* (with length in adjacent argument) */
+%typemap(argout) (unsigned char *data, int len) {
+    if ($1 == NULL) {
+        Py_INCREF(Py_None);
+        $result = Py_None;
+    } else {
+        $result = PyBytes_FromStringAndSize((char *) $1, $2);
+    }
+}
 
 %include "bindings.i"
 %include "constants.py"
